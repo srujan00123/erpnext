@@ -467,6 +467,28 @@ def make_return_doc(doctype: str, source_name: str, target_doc=None, return_agai
 
 	def set_missing_values(source, target):
 		doc = frappe.get_doc(target)
+		# ``item_condition`` runs against the original row before ``update_item``
+		# subtracts earlier submitted returns.  A fully returned line therefore
+		# used to survive mapping as qty=0 beside still-returnable lines. Stock
+		# invoices reject that zero row during validation, which made a partial
+		# multi-line sale impossible to return a second time. Keep rows that still
+		# move quantity on any supported return document and omit exhausted ones.
+		doc.set(
+			"items",
+			[
+				row
+				for row in (doc.get("items") or [])
+				if any(
+					flt(row.get(fieldname))
+					for fieldname in ("qty", "stock_qty", "received_qty", "rejected_qty")
+				)
+			],
+		)
+		if not doc.get("items"):
+			frappe.throw(
+				_("Every selected item has already been fully returned."),
+				title=_("Nothing Left to Return"),
+			)
 		doc.is_return = 1
 		doc.ignore_pricing_rule = 1
 		doc.pricing_rules = []
