@@ -5,7 +5,7 @@ import vm from "node:vm";
 
 const source = readFileSync(
   new URL("./pos_past_order_summary.js", import.meta.url),
-  "utf8",
+  "utf8"
 );
 
 function loadSummaryPrototype(frappe) {
