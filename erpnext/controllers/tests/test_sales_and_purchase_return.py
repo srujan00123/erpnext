@@ -122,3 +122,21 @@ class TestSalesAndPurchaseReturn(ERPNextTestSuite):
 		second_return = make_return_doc(si.doctype, si.name)
 		self.assertEqual(second_return.items[0].qty, -24)
 		second_return.save().submit()
+
+	def test_return_mapper_omits_a_fully_returned_line_but_keeps_the_remainder(self):
+		"""A completed line must not reappear as qty 0 beside another returnable line."""
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = create_sales_invoice(qty=1, do_not_save=True)
+		si.append("items", si.items[0].as_dict())
+		si.save().submit()
+
+		first_return = make_return_doc(si.doctype, si.name)
+		first_return.set("items", [first_return.items[0]])
+		first_return.save().submit()
+
+		second_return = make_return_doc(si.doctype, si.name)
+		self.assertEqual(len(second_return.items), 1)
+		self.assertEqual(second_return.items[0].sales_invoice_item, si.items[1].name)
+		self.assertEqual(second_return.items[0].qty, -1)
