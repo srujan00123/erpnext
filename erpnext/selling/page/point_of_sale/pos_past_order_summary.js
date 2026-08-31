@@ -32,7 +32,7 @@ erpnext.PointOfSale.PastOrderSummary = class {
 						<div class="summary-btns"></div>
 					</div>
 				</div>
-			</section>`
+			</section>`,
 		);
 
 		this.$component = this.wrapper.find(".past-order-summary");
@@ -119,7 +119,7 @@ erpnext.PointOfSale.PastOrderSummary = class {
 			} else {
 				return `<div class="item-rate">${format_currency(
 					item_data.price_list_rate || item_data.rate,
-					doc.currency
+					doc.currency,
 				)}</div>`;
 			}
 		}
@@ -252,14 +252,31 @@ erpnext.PointOfSale.PastOrderSummary = class {
 		});
 	}
 
-	print_receipt() {
+	async get_receipt_print_format() {
 		const frm = this.events.get_frm();
+		const fallback = frm.pos_print_format;
+		if (!this.doc.pos_profile) return fallback;
+
+		try {
+			const { message } = await frappe.db.get_value(
+				"POS Profile",
+				this.doc.pos_profile,
+				"print_format",
+			);
+			return message?.print_format || fallback;
+		} catch {
+			return fallback;
+		}
+	}
+
+	async print_receipt() {
+		const print_format = await this.get_receipt_print_format();
 		frappe.utils.print(
 			this.doc.doctype,
 			this.doc.name,
-			frm.pos_print_format,
+			print_format,
 			this.doc.letter_head,
-			this.doc.language || frappe.boot.lang
+			this.doc.language || frappe.boot.lang,
 		);
 	}
 
@@ -292,12 +309,12 @@ erpnext.PointOfSale.PastOrderSummary = class {
 		});
 	}
 
-	send_email() {
+	async send_email() {
 		const frm = this.events.get_frm();
 		const recipients = this.email_dialog.get_values().email_id;
 		const content = this.email_dialog.get_values().content;
 		const doc = this.doc || frm.doc;
-		const print_format = frm.pos_print_format;
+		const print_format = await this.get_receipt_print_format();
 
 		frappe.call({
 			method: "frappe.core.doctype.communication.email.make",
@@ -319,7 +336,7 @@ erpnext.PointOfSale.PastOrderSummary = class {
 						frappe.msgprint(
 							__("Email not sent to {0} (unsubscribed / disabled)", [
 								frappe.utils.escape_html(r.message["emails_not_sent_to"]),
-							])
+							]),
 						);
 					} else {
 						frappe.show_alert({
@@ -343,7 +360,7 @@ erpnext.PointOfSale.PastOrderSummary = class {
 					const class_name = b.split(" ")[0].toLowerCase();
 					const btn = __(b);
 					this.$summary_btns.append(
-						`<div class="summary-btn btn btn-default ${class_name}-btn">${btn}</div>`
+						`<div class="summary-btn btn btn-default ${class_name}-btn">${btn}</div>`,
 					);
 				});
 			}
