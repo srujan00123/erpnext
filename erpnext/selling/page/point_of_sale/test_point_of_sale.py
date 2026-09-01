@@ -50,7 +50,9 @@ class TestPointOfSaleBatchSelection(ERPNextTestSuite):
 
 		self.assertEqual(result.status, "split_required")
 		self.assertEqual(result.available_qty, 7)
-		self.assertEqual(result.allocations, [{"batch_no": "EARLY", "qty": 4}, {"batch_no": "NEXT", "qty": 2}])
+		self.assertEqual(
+			result.allocations, [{"batch_no": "EARLY", "qty": 4}, {"batch_no": "NEXT", "qty": 2}]
+		)
 
 	def test_reports_insufficient_total_batch_stock(self):
 		result = select_pos_batch(
