@@ -67,7 +67,13 @@ def select_pos_batch(available_batches, requested_qty, selected_batch_no=None):
 
 
 @frappe.whitelist()
-def get_pos_batch_selection(item_code, warehouse, qty, selected_batch_no=None, company=None):
+def get_pos_batch_selection(
+	item_code: str,
+	warehouse: str,
+	qty: float | str,
+	selected_batch_no: str | None = None,
+	company: str | None = None,
+) -> frappe._dict:
 	"""Return the current FEFO batch decision for one POS cart line."""
 	if not frappe.db.get_value("Item", item_code, "has_batch_no"):
 		return frappe._dict(status="not_batched")
