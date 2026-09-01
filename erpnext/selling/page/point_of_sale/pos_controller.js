@@ -446,7 +446,8 @@ erpnext.PointOfSale.Controller = class {
 					}
 				},
 
-				submit_invoice: () => {
+				submit_invoice: async () => {
+					await this.validate_pos_batches();
 					this.frm.savesubmit().then((r) => {
 						this.toggle_components(false);
 						this.toggle_submitted_invoice_summary(true);
@@ -673,6 +674,10 @@ erpnext.PointOfSale.Controller = class {
 							item_row.serial_no + `\n${item.serial_no}`
 						);
 					}
+					if (["qty", "conversion_factor", "batch_no", "warehouse"].includes(field)) {
+						const qty_needed = flt(item_row.qty) * flt(item_row.conversion_factor);
+						await this.ensure_pos_batch_availability(item_row, qty_needed);
+					}
 					this.update_cart_html(item_row);
 				}
 			} else {
@@ -709,6 +714,10 @@ erpnext.PointOfSale.Controller = class {
 				}
 
 				await this.trigger_new_item_events(item_row);
+				await this.ensure_pos_batch_availability(
+					item_row,
+					flt(item_row.qty) * flt(item_row.conversion_factor)
+				);
 
 				this.update_cart_html(item_row);
 
@@ -834,6 +843,75 @@ erpnext.PointOfSale.Controller = class {
 		frappe.dom.freeze();
 	}
 
+	async ensure_pos_batch_availability(item_row, qty_needed) {
+		if (!(item_row.has_batch_no || item_row.batch_no) || !qty_needed || this.frm.doc.is_return) {
+			return;
+		}
+
+		const { message: selection } = await frappe.call({
+			method: "erpnext.selling.page.point_of_sale.point_of_sale.get_pos_batch_selection",
+			args: {
+				item_code: item_row.item_code,
+				warehouse: item_row.warehouse || this.frm.doc.set_warehouse,
+				qty: qty_needed,
+				selected_batch_no: item_row.batch_no,
+				company: this.frm.doc.company,
+			},
+		});
+
+		if (!selection || ["available", "not_batched"].includes(selection.status)) return;
+
+		if (selection.status === "replacement") {
+			const previous_batch = item_row.batch_no || __("none");
+			await frappe.model.set_value(item_row.doctype, item_row.name, "batch_no", selection.batch_no);
+			// Batch-specific Item Prices are valid in ERPNext. Re-run the field
+			// trigger so an automatic FEFO replacement cannot retain the old
+			// batch's price.
+			await this.frm.script_manager.trigger("batch_no", item_row.doctype, item_row.name);
+			frappe.show_alert(
+				{
+					indicator: "orange",
+					message: __("Batch {0} has only {1} available for {2}. Switched to FEFO batch {3}.", [
+						previous_batch.bold(),
+						selection.selected_batch_qty,
+						item_row.item_code.bold(),
+						selection.batch_no.bold(),
+					]),
+				},
+				7
+			);
+			return;
+		}
+
+		const selected_batch = (item_row.batch_no || __("No batch")).bold();
+		const detail =
+			selection.status === "split_required"
+				? __(
+						"No single batch can fulfil this quantity. Split the line across the available batches before checkout."
+				  )
+				: __("Only {0} is available across all valid batches.", [selection.available_qty]);
+		frappe.throw({
+			title: __("Batch Stock Unavailable"),
+			message: __("Batch {0} cannot fulfil {1} {2} of Item {3}. {4}", [
+				selected_batch,
+				qty_needed,
+				item_row.stock_uom,
+				item_row.item_code.bold(),
+				detail,
+			]),
+			indicator: "orange",
+		});
+	}
+
+	async validate_pos_batches() {
+		for (const item_row of this.frm.doc.items) {
+			await this.ensure_pos_batch_availability(
+				item_row,
+				flt(item_row.qty) * flt(item_row.conversion_factor)
+			);
+		}
+	}
+
 	async check_serial_no_availablilty(item_code, warehouse, serial_no) {
 		const method = "erpnext.stock.doctype.serial_no.serial_no.get_pos_reserved_serial_nos";
 		const args = { filters: { item_code, warehouse } };
@@ -893,6 +971,7 @@ erpnext.PointOfSale.Controller = class {
 	}
 
 	async save_and_checkout() {
+		await this.validate_pos_batches();
 		if (this.frm.is_dirty()) {
 			let save_error = false;
 			await this.frm.save(null, null, null, () => (save_error = true));
