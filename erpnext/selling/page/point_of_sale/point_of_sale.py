@@ -6,13 +6,86 @@ import json
 
 import frappe
 from frappe.query_builder import Criterion, DocType, Order
-from frappe.utils import cint, get_datetime
+from frappe.utils import cint, flt, get_datetime, now_datetime
 from frappe.utils.nestedset import get_root_of
 
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import get_item_group, get_stock_availability
 from erpnext.accounts.doctype.pos_profile.pos_profile import get_child_nodes, get_item_groups
 from erpnext.stock.get_item_details import get_conversion_factor
 from erpnext.stock.utils import scan_barcode
+
+
+def select_pos_batch(available_batches, requested_qty, selected_batch_no=None):
+	"""Choose one FEFO batch for a POS line without silently splitting it.
+
+	``available_batches`` is already ordered by expiry.  A selected batch wins
+	while it can fulfil the whole line.  Otherwise the first single batch that
+	can fulfil it is a safe replacement.  When stock has to come from multiple
+	batches, return an explicit allocation so the UI can ask the cashier to split
+	the line instead of failing only after payment details have been entered.
+	"""
+	requested_qty = flt(requested_qty)
+	batches = [frappe._dict(row) for row in available_batches if flt(row.get("qty")) > 0]
+	selected = next((row for row in batches if row.batch_no == selected_batch_no), None)
+	selected_qty = flt(selected.qty) if selected else 0
+
+	if selected and selected_qty >= requested_qty:
+		return frappe._dict(
+			status="available",
+			batch_no=selected.batch_no,
+			selected_batch_qty=selected_qty,
+			available_qty=sum(flt(row.qty) for row in batches),
+		)
+
+	replacement = next((row for row in batches if flt(row.qty) >= requested_qty), None)
+	if replacement:
+		return frappe._dict(
+			status="replacement",
+			batch_no=replacement.batch_no,
+			selected_batch_qty=selected_qty,
+			batch_qty=flt(replacement.qty),
+			available_qty=sum(flt(row.qty) for row in batches),
+		)
+
+	remaining = requested_qty
+	allocations = []
+	for row in batches:
+		if remaining <= 0:
+			break
+		allocated_qty = min(flt(row.qty), remaining)
+		allocations.append({"batch_no": row.batch_no, "qty": allocated_qty})
+		remaining -= allocated_qty
+
+	available_qty = sum(flt(row.qty) for row in batches)
+	return frappe._dict(
+		status="split_required" if remaining <= 0 else "insufficient",
+		batch_no=None,
+		selected_batch_qty=selected_qty,
+		available_qty=available_qty,
+		allocations=allocations,
+	)
+
+
+@frappe.whitelist()
+def get_pos_batch_selection(item_code, warehouse, qty, selected_batch_no=None, company=None):
+	"""Return the current FEFO batch decision for one POS cart line."""
+	if not frappe.db.get_value("Item", item_code, "has_batch_no"):
+		return frappe._dict(status="not_batched")
+
+	from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
+		get_available_batches,
+	)
+
+	available_batches = get_available_batches(
+		frappe._dict(
+			item_code=item_code,
+			warehouse=warehouse,
+			company=company,
+			based_on="Expiry",
+			posting_datetime=now_datetime(),
+		)
+	)
+	return select_pos_batch(available_batches, qty, selected_batch_no)
 
 
 def search_by_term(search_term, warehouse, price_list):

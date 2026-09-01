@@ -5,9 +5,62 @@ import frappe
 from frappe.utils import random_string
 
 from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
-from erpnext.selling.page.point_of_sale.point_of_sale import get_items
+from erpnext.selling.page.point_of_sale.point_of_sale import get_items, select_pos_batch
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.tests.utils import ERPNextTestSuite
+
+
+class TestPointOfSaleBatchSelection(ERPNextTestSuite):
+	def test_keeps_selected_batch_when_it_can_fulfil_quantity(self):
+		result = select_pos_batch(
+			[
+				frappe._dict(batch_no="EARLY", qty=8),
+				frappe._dict(batch_no="LATER", qty=20),
+			],
+			requested_qty=6,
+			selected_batch_no="EARLY",
+		)
+
+		self.assertEqual(result.status, "available")
+		self.assertEqual(result.batch_no, "EARLY")
+
+	def test_replaces_short_batch_with_next_fefo_batch(self):
+		result = select_pos_batch(
+			[
+				frappe._dict(batch_no="EARLY", qty=4),
+				frappe._dict(batch_no="NEXT", qty=132),
+			],
+			requested_qty=6,
+			selected_batch_no="EARLY",
+		)
+
+		self.assertEqual(result.status, "replacement")
+		self.assertEqual(result.batch_no, "NEXT")
+		self.assertEqual(result.selected_batch_qty, 4)
+
+	def test_reports_split_when_no_single_batch_can_fulfil_quantity(self):
+		result = select_pos_batch(
+			[
+				frappe._dict(batch_no="EARLY", qty=4),
+				frappe._dict(batch_no="NEXT", qty=3),
+			],
+			requested_qty=6,
+			selected_batch_no="EARLY",
+		)
+
+		self.assertEqual(result.status, "split_required")
+		self.assertEqual(result.available_qty, 7)
+		self.assertEqual(result.allocations, [{"batch_no": "EARLY", "qty": 4}, {"batch_no": "NEXT", "qty": 2}])
+
+	def test_reports_insufficient_total_batch_stock(self):
+		result = select_pos_batch(
+			[frappe._dict(batch_no="EARLY", qty=4)],
+			requested_qty=6,
+			selected_batch_no="EARLY",
+		)
+
+		self.assertEqual(result.status, "insufficient")
+		self.assertEqual(result.available_qty, 4)
 
 
 class TestPointOfSaleGetItems(ERPNextTestSuite):
