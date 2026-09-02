@@ -1,6 +1,8 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 
 from erpnext.stock.doctype.item.test_item import make_item
@@ -81,6 +83,71 @@ class TestBin(ERPNextTestSuite):
 		self.assertEqual(bin.actual_qty, 0)
 		self.assertEqual(bin.valuation_rate, 0)
 		self.assertEqual(bin.stock_value, 0)
+
+	def test_repost_after_latest_cancel_restores_previous_bin(self):
+		"""A resumed repost with no active rows in its window must use the latest earlier SLE."""
+		from frappe.utils import add_days, nowdate
+
+		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
+		from erpnext.stock.stock_ledger import update_entries_after
+
+		item_code = make_item().name
+		warehouse = "_Test Warehouse - _TC"
+		make_stock_entry(
+			item_code=item_code,
+			target=warehouse,
+			qty=10,
+			rate=100,
+			posting_date=add_days(nowdate(), -1),
+			posting_time="10:00:00",
+		)
+		latest = make_stock_entry(
+			item_code=item_code,
+			target=warehouse,
+			qty=5,
+			rate=200,
+			posting_date=nowdate(),
+			posting_time="10:00:00",
+		)
+		latest_sle = frappe.db.get_value(
+			"Stock Ledger Entry",
+			{"voucher_type": latest.doctype, "voucher_no": latest.name, "is_cancelled": 0},
+			[
+				"name",
+				"item_code",
+				"warehouse",
+				"posting_date",
+				"posting_time",
+				"posting_datetime",
+				"creation",
+			],
+			as_dict=True,
+		)
+
+		# Cancellation marks the newest row inactive before the queued item/warehouse repost runs.
+		# The Bin therefore still has the cancelled row's balance when this repost begins.
+		frappe.db.set_value("Stock Ledger Entry", latest_sle.name, "is_cancelled", 1)
+
+		with patch.object(update_entries_after, "update_data_in_repost"):
+			update_entries_after(
+				{
+					"item_code": item_code,
+					"warehouse": warehouse,
+					"posting_date": latest_sle.posting_date,
+					"posting_time": latest_sle.posting_time,
+					"creation": latest_sle.creation,
+					"repost_doc": frappe._dict(name="test-repost", doctype="Repost Item Valuation"),
+					"items_to_be_repost": [],
+					"item_wh_wise_last_posted_sle": {
+						str((item_code, warehouse)): latest_sle,
+					},
+				}
+			)
+
+		bin = frappe.get_doc("Bin", {"item_code": item_code, "warehouse": warehouse})
+		self.assertEqual(bin.actual_qty, 10)
+		self.assertEqual(bin.valuation_rate, 100)
+		self.assertEqual(bin.stock_value, 1000)
 
 	def test_cancelling_last_entry_resets_bin(self):
 		"""Cancelling the only voucher must clear stock value, not just quantity."""
