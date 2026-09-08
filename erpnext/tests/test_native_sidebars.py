@@ -9,6 +9,15 @@ from frappe.tests import IntegrationTestCase
 
 class TestNativeSidebars(IntegrationTestCase):
 	def test_erpnext_ships_the_dock_that_reaches_its_native_sidebars(self):
+		"""A dock-less app hides Frappe v17's sidebar toggle entirely.
+
+		Without it a single sub-768px visit collapses the sidebar with no way back,
+		which is why this file exists. Upstream has since adopted the dock and now
+		curates its module list itself, so asserting an exact ordered list only
+		breaks on every upstream reshuffle. Assert the contract instead: the dock is
+		shipped, it is wired to Sidebars, and it reaches the modules this deployment
+		actually bills out of.
+		"""
 		dock_path = Path(__file__).resolve().parents[1] / "dock" / "erpnext" / "erpnext.json"
 		with dock_path.open() as dock_file:
 			dock = json.load(dock_file)
@@ -17,11 +26,17 @@ class TestNativeSidebars(IntegrationTestCase):
 		self.assertEqual(dock["app"], "erpnext")
 		self.assertEqual(dock["name"], "erpnext")
 		self.assertEqual(dock["standard"], 1)
-		self.assertEqual(
-			[item["link_to"] for item in dock["items"]],
-			["Accounts", "Selling", "Buying", "Stock", "Manufacturing", "Projects", "Support", "Setup"],
+
+		items = dock["items"]
+		self.assertTrue(items, "the dock ships no items, so it reaches no sidebar")
+		self.assertTrue(
+			all(item["link_type"] == "Sidebar" for item in items),
+			"every dock item must point at a Sidebar, or the toggle leads nowhere",
 		)
-		self.assertTrue(all(item["link_type"] == "Sidebar" for item in dock["items"]))
+
+		links = {item["link_to"] for item in items}
+		for module in ("Accounts", "Selling", "Buying", "Stock", "Setup"):
+			self.assertIn(module, links)
 
 	def test_every_legacy_erpnext_sidebar_module_has_been_converted(self):
 		results = convert_app("erpnext", dry_run=True)
