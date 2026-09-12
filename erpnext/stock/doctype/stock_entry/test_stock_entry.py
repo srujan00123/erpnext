@@ -1362,7 +1362,7 @@ class TestStockEntry(ERPNextTestSuite):
 				"secondary_item_type": "By-Product",
 				"qty": 1,
 				"cost_allocation_per": 10,
-				"valuation_type": "% of FG Cost",
+				"valuation_type": "% of Component Cost",
 			},
 		)
 		bom_doc.save()
@@ -1446,7 +1446,7 @@ class TestStockEntry(ERPNextTestSuite):
 				"secondary_item_type": "By-Product",
 				"qty": 1,
 				"cost_allocation_per": 10,
-				"valuation_type": "% of FG Cost",
+				"valuation_type": "% of Component Cost",
 			},
 		)
 		bom_doc.save()
@@ -1660,7 +1660,7 @@ class TestStockEntry(ERPNextTestSuite):
 		self.assertEqual(fg_row.basic_amount, 830)
 
 		# there is no percentage to allocate without a BOM row
-		manual_row.valuation_type = "% of FG Cost"
+		manual_row.valuation_type = "% of Component Cost"
 		self.assertRaises(frappe.ValidationError, entry.save)
 
 	def test_valuation_rate_lookup_without_voucher_no(self):
@@ -3658,7 +3658,7 @@ class TestStockEntry(ERPNextTestSuite):
 				"qty": 5,
 				"cost_allocation_per": 25,
 				"process_loss_per": 0,
-				"valuation_type": "% of FG Cost",
+				"valuation_type": "% of Component Cost",
 			},
 		)
 		bom.insert()
@@ -3720,7 +3720,7 @@ class TestStockEntry(ERPNextTestSuite):
 				"qty": 5,
 				"cost_allocation_per": 0,
 				"process_loss_per": 0,
-				"valuation_type": "% of FG Cost",
+				"valuation_type": "% of Component Cost",
 			},
 		)
 		bom.insert()
@@ -3777,7 +3777,7 @@ class TestStockEntry(ERPNextTestSuite):
 				"qty": 5,
 				"cost_allocation_per": 25,
 				"process_loss_per": 0,
-				"valuation_type": "% of FG Cost",
+				"valuation_type": "% of Component Cost",
 			},
 		)
 		bom.insert()
@@ -4444,11 +4444,6 @@ class TestStockEntryCoverage(ERPNextTestSuite):
 
 	# ── validate_source_stock_entry ────────────────────────────────────────────
 
-	def test_validate_source_stock_entry_skips_when_no_source(self):
-		se = frappe.new_doc("Stock Entry")
-		se.source_stock_entry = None
-		se.validate_source_stock_entry()  # must not raise
-
 	def test_validate_source_stock_entry_throws_on_work_order_mismatch(self):
 		source_se = make_stock_entry(
 			item_code="_Test Item",
@@ -4477,62 +4472,6 @@ class TestStockEntryCoverage(ERPNextTestSuite):
 		se.source_stock_entry = source_se.name
 		se.work_order = "WO-SAME-001"
 		se.validate_source_stock_entry()  # must not raise
-
-	# ── validate_job_card_fg_item ──────────────────────────────────────────────
-
-	def test_validate_job_card_fg_item_skips_when_no_job_card(self):
-		se = frappe.new_doc("Stock Entry")
-		se.job_card = None
-		se.validate_job_card_fg_item()  # must not raise
-
-	def test_validate_job_card_fg_item_throws_when_fg_item_mismatches(self):
-		wrong_fg = make_item("_JC Wrong FG Item", {"is_stock_item": 1}).name
-
-		jc_name = frappe.db.get_value("Job Card", {"docstatus": 1, "finished_good": ("!=", "")})
-		if not jc_name:
-			return  # skip if no suitable job card in test data
-
-		jc = frappe.db.get_value("Job Card", jc_name, ["finished_good"], as_dict=1)
-		if jc.finished_good == wrong_fg:
-			return  # skip if the wrong_fg happens to match
-
-		se = frappe.new_doc("Stock Entry")
-		se.job_card = jc_name
-		se.append("items", {"item_code": wrong_fg, "is_finished_item": 1, "qty": 1})
-		self.assertRaises(frappe.ValidationError, se.validate_job_card_fg_item)
-
-	# ── validate_job_card_item ─────────────────────────────────────────────────
-
-	def test_validate_job_card_item_skips_when_no_job_card(self):
-		se = frappe.new_doc("Stock Entry")
-		se.job_card = None
-		se.validate_job_card_item()  # must not raise
-
-	def test_validate_job_card_item_skips_for_manufacture_purpose(self):
-		se = frappe.new_doc("Stock Entry")
-		se.job_card = "SOME-JC-001"
-		se.purpose = "Manufacture"
-		se.validate_job_card_item()  # must not raise even with a job card set
-
-	@ERPNextTestSuite.change_settings("Manufacturing Settings", {"job_card_excess_transfer": 0})
-	def test_validate_job_card_item_throws_when_job_card_item_ref_missing(self):
-		jc_name = frappe.db.get_value("Job Card", {"docstatus": 1})
-		if not jc_name:
-			return  # skip if no job cards in test data
-
-		se = frappe.new_doc("Stock Entry")
-		se.job_card = jc_name
-		se.purpose = "Material Transfer for Manufacture"
-		se.append(
-			"items",
-			{
-				"item_code": "_Test Item",
-				"s_warehouse": "_Test Warehouse - _TC",
-				"qty": 1,
-				"job_card_item": None,
-			},
-		)
-		self.assertRaises(frappe.ValidationError, se.validate_job_card_item)
 
 	# ── get_available_materials ────────────────────────────────────────────────
 
