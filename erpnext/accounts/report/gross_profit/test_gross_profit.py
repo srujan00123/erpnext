@@ -1194,3 +1194,46 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(base_rate, 220.0)  # avg selling rate = 220/1
 		self.assertEqual(gross_profit, 120.0)  # 220 - 100
 		self.assertAlmostEqual(gp_percent, 54.545, places=2)  # 120/220 * 100
+
+	def test_invoice_with_additional_discount(self):
+		"""
+		Test that discount_percent and discount_amount columns correctly report
+		invoice-level discounts.
+		"""
+		make_stock_entry(
+			company=self.company,
+			item_code=self.item,
+			target=self.warehouse,
+			qty=2,
+			basic_rate=100,
+		)
+
+		sinv = self.create_sales_invoice(qty=2, rate=200, do_not_save=True)
+		sinv.update_stock = 1
+		sinv.apply_discount_on = "Grand Total"
+		sinv.additional_discount_percentage = 20.0
+		sinv = sinv.save().submit()
+
+		filters = frappe._dict(
+			company=self.company,
+			from_date=nowdate(),
+			to_date=nowdate(),
+			group_by="Invoice",
+		)
+
+		columns, data = execute(filters=filters)
+
+		sinv_item_rows = [x for x in data if x.get("parent_invoice") == sinv.name and x.get("indent") == 1.0]
+		self.assertEqual(len(sinv_item_rows), 1)
+
+		sinv_row = sinv_item_rows[0]
+		self.assertEqual(sinv_row.discount_percent, 20.0)
+		self.assertEqual(sinv_row.discount_amount, 80.0)
+		self.assertEqual(sinv_row.selling_amount, 320.0)
+
+		# Parent invoice row
+		parent_row = next((x for x in data if x.get("sales_invoice") == sinv.name and x.get("indent") == 0.0), None)
+		self.assertIsNotNone(parent_row)
+		self.assertEqual(parent_row.discount_percent, 20.0)
+		self.assertEqual(parent_row.discount_amount, 80.0)
+		self.assertEqual(parent_row.selling_amount, 320.0)
