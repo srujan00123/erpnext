@@ -1237,3 +1237,59 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(parent_row.discount_percent, 20.0)
 		self.assertEqual(parent_row.discount_amount, 80.0)
 		self.assertEqual(parent_row.selling_amount, 320.0)
+
+	def test_consolidated_group_company(self):
+		"""
+		Test that when running Gross Profit for a parent group company,
+		invoices from subsidiary operating companies are included with the
+		Company column visible and populated.
+		"""
+		group_company_name = "_Test Group Company GP"
+		if not frappe.db.exists("Company", group_company_name):
+			group_doc = frappe.get_doc(
+				{
+					"doctype": "Company",
+					"company_name": group_company_name,
+					"is_group": 1,
+					"default_currency": "INR",
+				}
+			).insert()
+		else:
+			group_doc = frappe.get_doc("Company", group_company_name)
+
+		old_parent = frappe.db.get_value("Company", self.company, "parent_company")
+		try:
+			frappe.db.set_value("Company", self.company, "parent_company", group_doc.name)
+			from frappe.utils.nestedset import rebuild_tree
+
+			rebuild_tree("Company")
+
+			sinv = self.create_sales_invoice(qty=1, rate=150)
+
+			filters = frappe._dict(
+				company=group_doc.name,
+				from_date=nowdate(),
+				to_date=nowdate(),
+				group_by="Invoice",
+			)
+
+			columns, data = execute(filters=filters)
+
+			# Verify Company column exists
+			company_col = next((c for c in columns if c.get("fieldname") == "company"), None)
+			self.assertIsNotNone(company_col)
+
+			# Verify sinv is in data and has company populated
+			parent_row = next((x for x in data if x.get("sales_invoice") == sinv.name and x.get("indent") == 0.0), None)
+			self.assertIsNotNone(parent_row)
+			self.assertEqual(parent_row.company, self.company)
+
+			item_row = next((x for x in data if x.get("parent_invoice") == sinv.name and x.get("indent") == 1.0), None)
+			self.assertIsNotNone(item_row)
+			self.assertEqual(item_row.company, self.company)
+		finally:
+			frappe.db.set_value("Company", self.company, "parent_company", old_parent)
+			from frappe.utils.nestedset import rebuild_tree
+
+			rebuild_tree("Company")
+
