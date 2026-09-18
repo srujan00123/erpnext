@@ -19,6 +19,19 @@ from erpnext.stock.report.stock_ledger.stock_ledger import get_item_group_condit
 from erpnext.stock.utils import get_incoming_rate
 
 
+def get_subsidiary_companies(company):
+	cached = frappe.get_cached_value("Company", company, ["lft", "rgt", "is_group"], as_dict=True)
+	if not cached or not cached.get("is_group"):
+		return [company]
+
+	return frappe.get_all(
+		"Company",
+		filters={"lft": [">=", cached.lft], "rgt": ["<=", cached.rgt]},
+		pluck="name",
+		order_by="lft, rgt",
+	)
+
+
 def execute(filters=None):
 	if not filters:
 		filters = frappe._dict()
@@ -37,6 +50,7 @@ def execute(filters=None):
 				"customer",
 				"customer_group",
 				"customer_name",
+				"company",
 				"posting_date",
 				"item_code",
 				"item_name",
@@ -54,6 +68,18 @@ def execute(filters=None):
 				"gross_profit",
 				"gross_profit_percent",
 				"project",
+			],
+			"company": [
+				"company",
+				"qty",
+				"base_rate",
+				"discount_percentage",
+				"discount_amount",
+				"buying_rate",
+				"base_amount",
+				"buying_amount",
+				"gross_profit",
+				"gross_profit_percent",
 			],
 			"item_code": [
 				"item_code",
@@ -211,14 +237,12 @@ def get_data_when_grouped_by_invoice(columns, gross_profit_data, filters, group_
 	columns[0]["options"] = "Item"
 	columns[0]["width"] = 300
 	# removing the duplicate Item Code column and moving Item Name before Customer
-	supplier_master_name = frappe.db.get_single_value("Buying Settings", "supp_master_name")
-	customer_master_name = frappe.db.get_single_value("Selling Settings", "cust_master_name")
-	if supplier_master_name == "Supplier Name" and customer_master_name == "Customer Name":
-		del columns[4]
-		columns.insert(1, columns.pop(4))
-	else:
-		del columns[5]
-		columns.insert(1, columns.pop(5))
+	item_code_col = next((c for c in columns if c.get("fieldname") == "item_code"), None)
+	if item_code_col:
+		columns.remove(item_code_col)
+	item_name_idx = next((i for i, c in enumerate(columns) if c.get("fieldname") == "item_name"), None)
+	if item_name_idx is not None:
+		columns.insert(1, columns.pop(item_name_idx))
 
 	total_base_amount = 0
 	total_buying_amount = 0
@@ -257,6 +281,7 @@ def get_data_when_grouped_by_invoice(columns, gross_profit_data, filters, group_
 		frappe._dict(
 			{
 				"sales_invoice": "Total",
+				"company": None,
 				"qty": None,
 				"avg._selling_rate": None,
 				"discount_percent": total_discount_pct,
@@ -350,6 +375,13 @@ def get_columns(group_wise_columns, filters):
 				"fieldtype": "Link",
 				"options": "Sales Invoice",
 				"width": 120,
+			},
+			"company": {
+				"label": _("Company"),
+				"fieldname": "company",
+				"fieldtype": "Link",
+				"options": "Company",
+				"width": 140,
 			},
 			"posting_date": {
 				"label": _("Posting Date"),
@@ -547,6 +579,7 @@ def get_column_names():
 	return frappe._dict(
 		{
 			"invoice_or_item": "sales_invoice",
+			"company": "company",
 			"customer": "customer",
 			"customer_group": "customer_group",
 			"customer_name": "customer_name",
@@ -577,6 +610,9 @@ class GrossProfitGenerator:
 		self.data = []
 		self.average_buying_rate = {}
 		self.filters = frappe._dict(filters)
+		self.companies = []
+		if self.filters.company:
+			self.companies = get_subsidiary_companies(self.filters.company)
 		self.load_invoice_items()
 		self.load_drop_ship_buying_rates()
 		self.get_delivery_notes()
@@ -854,7 +890,7 @@ class GrossProfitGenerator:
 	def get_returned_invoice_items(self):
 		si = frappe.qb.DocType("Sales Invoice")
 		si_item = frappe.qb.DocType("Sales Invoice Item")
-		returned_invoices = (
+		query = (
 			frappe.qb.from_(si)
 			.inner_join(si_item)
 			.on(si.name == si_item.parent)
@@ -871,8 +907,14 @@ class GrossProfitGenerator:
 				& (si.is_return == 1)
 				& si.posting_date.between(self.filters.from_date, self.filters.to_date)
 			)
-			.run(as_dict=1)
 		)
+
+		if self.companies:
+			query = query.where(si.company.isin(self.companies))
+		elif self.filters.company:
+			query = query.where(si.company == self.filters.company)
+
+		returned_invoices = query.run(as_dict=1)
 
 		self.returned_invoices = frappe._dict()
 		self.legacy_returned_invoices = frappe._dict()
@@ -986,7 +1028,7 @@ class GrossProfitGenerator:
 			return flt(row.qty) * item_rate
 
 		else:
-			my_sle = self.get_stock_ledger_entries(item_code, row.warehouse)
+			my_sle = self.get_stock_ledger_entries(item_code, row.warehouse, row.get("company"))
 			if (row.update_stock or row.dn_detail) and my_sle:
 				parenttype = row.parenttype
 				parent = row.invoice or row.parent
@@ -1074,14 +1116,15 @@ class GrossProfitGenerator:
 
 	def get_average_buying_rate(self, row, item_code):
 		args = row
-		key = (item_code, row.warehouse)
+		company = row.get("company") or self.filters.company
+		key = (item_code, row.warehouse, company)
 		if key not in self.average_buying_rate:
 			args.update(
 				{
 					"voucher_type": row.parenttype,
 					"voucher_no": row.parent,
 					"allow_zero_valuation": True,
-					"company": self.filters.company,
+					"company": company,
 					"item_code": item_code,
 				}
 			)
@@ -1111,6 +1154,10 @@ class GrossProfitGenerator:
 			.where(purchase_invoice.is_return == 0)
 			.where(purchase_invoice_item.parenttype == "Purchase Invoice")
 		)
+
+		company = row.get("company") or self.filters.company
+		if company:
+			query = query.where(purchase_invoice.company == company)
 
 		if row.project:
 			query = query.where(purchase_invoice_item.project == row.project)
@@ -1173,6 +1220,7 @@ class GrossProfitGenerator:
 		query = self.apply_common_filters(query, SalesInvoice, SalesInvoiceItem, SalesTeam, Item)
 
 		query = query.select(
+			SalesInvoice.company,
 			SalesInvoiceItem.parenttype,
 			SalesInvoiceItem.parent,
 			SalesInvoice.posting_date,
@@ -1243,7 +1291,9 @@ class GrossProfitGenerator:
 		return query
 
 	def apply_common_filters(self, query, SalesInvoice, SalesInvoiceItem, SalesTeam, Item):
-		if self.filters.company:
+		if self.companies:
+			query = query.where(SalesInvoice.company.isin(self.companies))
+		elif self.filters.company:
 			query = query.where(SalesInvoice.company == self.filters.company)
 
 		if self.filters.from_date:
@@ -1365,6 +1415,7 @@ class GrossProfitGenerator:
 				"parent_invoice": "",
 				"indent": 0.0,
 				"invoice_or_item": row.parent,
+				"company": row.company,
 				"parent": None,
 				"posting_date": row.posting_date,
 				"posting_time": row.posting_time,
@@ -1400,6 +1451,7 @@ class GrossProfitGenerator:
 				"indent": row.indent + 1,
 				"parent": None,
 				"invoice_or_item": item.item_code,
+				"company": row.company,
 				"posting_date": row.posting_date,
 				"posting_time": row.posting_time,
 				"project": row.project,
@@ -1427,11 +1479,13 @@ class GrossProfitGenerator:
 			}
 		)
 
-	def get_stock_ledger_entries(self, item_code, warehouse):
+	def get_stock_ledger_entries(self, item_code, warehouse, company=None):
+		company = company or self.filters.company
 		if item_code and warehouse:
-			if (item_code, warehouse) not in self.sle:
+			key = (item_code, warehouse, company)
+			if key not in self.sle:
 				sle = qb.DocType("Stock Ledger Entry")
-				res = (
+				query = (
 					qb.from_(sle)
 					.select(
 						sle.item_code,
@@ -1443,19 +1497,23 @@ class GrossProfitGenerator:
 						sle.actual_qty.as_("qty"),
 					)
 					.where(
-						(sle.company == self.filters.company)
-						& (sle.item_code == item_code)
+						(sle.item_code == item_code)
 						& (sle.warehouse == warehouse)
 						& (sle.is_cancelled == 0)
 					)
-					.orderby(sle.item_code)
+				)
+				if company:
+					query = query.where(sle.company == company)
+
+				res = (
+					query.orderby(sle.item_code)
 					.orderby(sle.warehouse, sle.posting_datetime, sle.creation, order=Order.desc)
 					.run(as_dict=True)
 				)
 
-				self.sle[(item_code, warehouse)] = res
+				self.sle[key] = res
 
-			return self.sle[(item_code, warehouse)]
+			return self.sle[key]
 		return []
 
 	def load_product_bundle(self):
