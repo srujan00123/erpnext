@@ -252,29 +252,12 @@ erpnext.PointOfSale.PastOrderSummary = class {
 		});
 	}
 
-	async get_receipt_print_format() {
+	print_receipt() {
 		const frm = this.events.get_frm();
-		const fallback = frm.pos_print_format;
-		if (!this.doc.pos_profile) return fallback;
-
-		try {
-			const { message } = await frappe.db.get_value(
-				"POS Profile",
-				this.doc.pos_profile,
-				"print_format"
-			);
-			return message?.print_format || fallback;
-		} catch {
-			return fallback;
-		}
-	}
-
-	async print_receipt() {
-		const print_format = await this.get_receipt_print_format();
 		frappe.utils.print(
 			this.doc.doctype,
 			this.doc.name,
-			print_format,
+			frm.pos_print_format,
 			this.doc.letter_head,
 			this.doc.language || frappe.boot.lang
 		);
@@ -309,12 +292,12 @@ erpnext.PointOfSale.PastOrderSummary = class {
 		});
 	}
 
-	async send_email() {
+	send_email() {
 		const frm = this.events.get_frm();
 		const recipients = this.email_dialog.get_values().email_id;
 		const content = this.email_dialog.get_values().content;
 		const doc = this.doc || frm.doc;
-		const print_format = await this.get_receipt_print_format();
+		const print_format = frm.pos_print_format;
 
 		frappe.call({
 			method: "frappe.core.doctype.communication.email.make",

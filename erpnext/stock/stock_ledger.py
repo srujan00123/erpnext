@@ -1946,36 +1946,24 @@ class update_entries_after:
 		self.reset_bin_without_stock_ledger_entries()
 
 	def reset_bin_without_stock_ledger_entries(self):
-		"""Sync the bin when the repost window produced no active ledger rows.
-
-		This can mean the ledger is empty, or that cancelling the latest voucher left only
-		an older active entry before the repost window. ``prev_sle_dict`` covers neither case.
-		"""
+		"""Reset the bin when its ledger has no entries left, prev_sle_dict never covers that case."""
 		item_code, warehouse = self.args.get("item_code"), self.args.get("warehouse")
 		if not item_code or not warehouse or (item_code, warehouse) in self.prev_sle_dict:
 			return
 
-		latest_sle = frappe.db.get_value(
-			"Stock Ledger Entry",
-			{"item_code": item_code, "warehouse": warehouse, "is_cancelled": 0},
-			["qty_after_transaction", "stock_value", "valuation_rate"],
-			order_by="posting_datetime desc, creation desc",
-			as_dict=True,
-		)
+		if frappe.db.exists(
+			"Stock Ledger Entry", {"item_code": item_code, "warehouse": warehouse, "is_cancelled": 0}
+		):
+			return
 
 		bin_name = frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse})
 		if not bin_name:
 			return
 
-		updated_values = {
-			"actual_qty": flt(latest_sle.qty_after_transaction) if latest_sle else 0.0,
-			"stock_value": flt(latest_sle.stock_value) if latest_sle else 0.0,
-			"valuation_rate": flt(latest_sle.valuation_rate) if latest_sle else 0.0,
-		}
 		frappe.db.set_value(
 			"Bin",
 			bin_name,
-			updated_values,
+			{"actual_qty": 0.0, "stock_value": 0.0, "valuation_rate": 0.0},
 			update_modified=True,
 		)
 
