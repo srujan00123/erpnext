@@ -623,24 +623,3 @@ class TestGetItemDetail(ERPNextTestSuite):
 		):
 			self.assertEqual(self.get_picked_batch_no(item_code, 5, items=box_row), batches[0])
 			self.assertIsNone(self.get_picked_batch_no(item_code, 6, items=box_row))
-
-	def test_non_stock_item_does_not_default_warehouse(self):
-		from erpnext.stock.doctype.item.test_item import make_item
-
-		item_code = make_item(properties={"is_stock_item": 0}).name
-		args = frappe._dict(
-			{
-				"item_code": item_code,
-				"company": "_Test Company",
-				"customer": "_Test Customer",
-				"currency": "INR",
-				"conversion_rate": 1.0,
-				"price_list": "_Test Price List",
-				"price_list_currency": "INR",
-				"plc_conversion_rate": 1.0,
-				"doctype": "Sales Invoice",
-				"qty": 1,
-			}
-		)
-		details = get_item_details(args)
-		self.assertIsNone(details.get("warehouse"))

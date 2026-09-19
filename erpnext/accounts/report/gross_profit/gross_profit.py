@@ -19,24 +19,9 @@ from erpnext.stock.report.stock_ledger.stock_ledger import get_item_group_condit
 from erpnext.stock.utils import get_incoming_rate
 
 
-def get_subsidiary_companies(company):
-	cached = frappe.get_cached_value("Company", company, ["lft", "rgt", "is_group"], as_dict=True)
-	if not cached or not cached.get("is_group"):
-		return [company]
-
-	return frappe.get_all(
-		"Company",
-		filters={"lft": [">=", cached.lft], "rgt": ["<=", cached.rgt]},
-		pluck="name",
-		order_by="lft, rgt",
-	)
-
-
 def execute(filters=None):
 	if not filters:
 		filters = frappe._dict()
-	else:
-		filters = frappe._dict(filters)
 	filters.currency = frappe.get_cached_value("Company", filters.company, "default_currency")
 
 	gross_profit_data = GrossProfitGenerator(filters)
@@ -50,7 +35,6 @@ def execute(filters=None):
 				"customer",
 				"customer_group",
 				"customer_name",
-				"company",
 				"posting_date",
 				"item_code",
 				"item_name",
@@ -60,26 +44,12 @@ def execute(filters=None):
 				"warehouse",
 				"qty",
 				"base_rate",
-				"discount_percentage",
-				"discount_amount",
 				"buying_rate",
 				"base_amount",
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
 				"project",
-			],
-			"company": [
-				"company",
-				"qty",
-				"base_rate",
-				"discount_percentage",
-				"discount_amount",
-				"buying_rate",
-				"base_amount",
-				"buying_amount",
-				"gross_profit",
-				"gross_profit_percent",
 			],
 			"item_code": [
 				"item_code",
@@ -93,8 +63,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"warehouse": [
 				"warehouse",
@@ -105,8 +73,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"brand": [
 				"brand",
@@ -117,8 +83,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"item_group": [
 				"item_group",
@@ -129,8 +93,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"customer": [
 				"customer",
@@ -143,8 +105,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"customer_group": [
 				"customer_group",
@@ -155,8 +115,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"sales_person": [
 				"sales_person",
@@ -168,24 +126,14 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
-			"project": [
-				"project",
-				"base_amount",
-				"buying_amount",
-				"gross_profit",
-				"gross_profit_percent",
-				"discount_amount",
-			],
+			"project": ["project", "base_amount", "buying_amount", "gross_profit", "gross_profit_percent"],
 			"cost_center": [
 				"cost_center",
 				"base_amount",
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_amount",
 			],
 			"territory": [
 				"territory",
@@ -193,7 +141,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_amount",
 			],
 			"monthly": [
 				"monthly",
@@ -204,8 +151,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_percentage",
-				"discount_amount",
 			],
 			"payment_term": [
 				"payment_term",
@@ -213,7 +158,6 @@ def execute(filters=None):
 				"buying_amount",
 				"gross_profit",
 				"gross_profit_percent",
-				"discount_amount",
 			],
 		}
 	)
@@ -237,22 +181,22 @@ def get_data_when_grouped_by_invoice(columns, gross_profit_data, filters, group_
 	columns[0]["options"] = "Item"
 	columns[0]["width"] = 300
 	# removing the duplicate Item Code column and moving Item Name before Customer
-	item_code_col = next((c for c in columns if c.get("fieldname") == "item_code"), None)
-	if item_code_col:
-		columns.remove(item_code_col)
-	item_name_idx = next((i for i, c in enumerate(columns) if c.get("fieldname") == "item_name"), None)
-	if item_name_idx is not None:
-		columns.insert(1, columns.pop(item_name_idx))
+	supplier_master_name = frappe.db.get_single_value("Buying Settings", "supp_master_name")
+	customer_master_name = frappe.db.get_single_value("Selling Settings", "cust_master_name")
+	if supplier_master_name == "Supplier Name" and customer_master_name == "Customer Name":
+		del columns[4]
+		columns.insert(1, columns.pop(4))
+	else:
+		del columns[5]
+		columns.insert(1, columns.pop(5))
 
 	total_base_amount = 0
 	total_buying_amount = 0
-	total_discount_amount = 0
 
 	for src in gross_profit_data.si_list:
 		if src.indent == 1:
 			total_base_amount += src.base_amount or 0.0
 			total_buying_amount += src.buying_amount or 0.0
-			total_discount_amount += src.discount_amount or 0.0
 
 		row = frappe._dict()
 		row.indent = src.indent
@@ -269,23 +213,12 @@ def get_data_when_grouped_by_invoice(columns, gross_profit_data, filters, group_
 		if total_buying_amount < 0
 		else total_base_amount - total_buying_amount,
 	)
-	total_discount_pct = (
-		flt(
-			(total_discount_amount / (total_base_amount + total_discount_amount)) * 100.0,
-			2,
-		)
-		if (total_base_amount + total_discount_amount)
-		else 0.0
-	)
 	data.append(
 		frappe._dict(
 			{
 				"sales_invoice": "Total",
-				"company": None,
 				"qty": None,
 				"avg._selling_rate": None,
-				"discount_percent": total_discount_pct,
-				"discount_amount": total_discount_amount,
 				"valuation_rate": None,
 				"selling_amount": total_base_amount,
 				"buying_amount": total_buying_amount,
@@ -305,7 +238,6 @@ def get_data_when_grouped_by_invoice(columns, gross_profit_data, filters, group_
 def get_data_when_not_grouped_by_invoice(gross_profit_data, filters, group_wise_columns, data):
 	total_base_amount = 0
 	total_buying_amount = 0
-	total_discount_amount = 0
 
 	group_columns = group_wise_columns.get(scrub(filters.group_by))
 
@@ -321,7 +253,6 @@ def get_data_when_not_grouped_by_invoice(gross_profit_data, filters, group_wise_
 	for src in gross_profit_data.grouped_data:
 		total_base_amount += src.base_amount or 0.00
 		total_buying_amount += src.buying_amount or 0.00
-		total_discount_amount += src.discount_amount or 0.00
 
 		row = [src.get(col) for col in group_columns] + [filters.currency]
 
@@ -339,13 +270,6 @@ def get_data_when_not_grouped_by_invoice(gross_profit_data, filters, group_wise_
 		group_columns[0]: "Total",
 		"base_amount": total_base_amount,
 		"buying_amount": total_buying_amount,
-		"discount_amount": total_discount_amount,
-		"discount_percentage": flt(
-			(total_discount_amount / (total_base_amount + total_discount_amount)) * 100.0,
-			2,
-		)
-		if (total_base_amount + total_discount_amount)
-		else 0.0,
 		"gross_profit": total_gross_profit,
 		"gross_profit_percent": flt(gross_profit_percent, currency_precision),
 		"currency": filters.currency,
@@ -375,13 +299,6 @@ def get_columns(group_wise_columns, filters):
 				"fieldtype": "Link",
 				"options": "Sales Invoice",
 				"width": 120,
-			},
-			"company": {
-				"label": _("Company"),
-				"fieldname": "company",
-				"fieldtype": "Link",
-				"options": "Company",
-				"width": 140,
 			},
 			"posting_date": {
 				"label": _("Posting Date"),
@@ -436,19 +353,6 @@ def get_columns(group_wise_columns, filters):
 				"fieldtype": "Currency",
 				"options": "currency",
 				"width": 100,
-			},
-			"discount_percentage": {
-				"label": _("Discount %"),
-				"fieldname": "discount_percent",
-				"fieldtype": "Percent",
-				"width": 100,
-			},
-			"discount_amount": {
-				"label": _("Discount Amount"),
-				"fieldname": "discount_amount",
-				"fieldtype": "Currency",
-				"options": "currency",
-				"width": 110,
 			},
 			"buying_rate": {
 				"label": _("Valuation Rate"),
@@ -579,7 +483,6 @@ def get_column_names():
 	return frappe._dict(
 		{
 			"invoice_or_item": "sales_invoice",
-			"company": "company",
 			"customer": "customer",
 			"customer_group": "customer_group",
 			"customer_name": "customer_name",
@@ -592,8 +495,6 @@ def get_column_names():
 			"warehouse": "warehouse",
 			"qty": "qty",
 			"base_rate": "avg._selling_rate",
-			"discount_percentage": "discount_percent",
-			"discount_amount": "discount_amount",
 			"buying_rate": "valuation_rate",
 			"base_amount": "selling_amount",
 			"buying_amount": "buying_amount",
@@ -610,9 +511,6 @@ class GrossProfitGenerator:
 		self.data = []
 		self.average_buying_rate = {}
 		self.filters = frappe._dict(filters)
-		self.companies = []
-		if self.filters.company:
-			self.companies = get_subsidiary_companies(self.filters.company)
 		self.load_invoice_items()
 		self.load_drop_ship_buying_rates()
 		self.get_delivery_notes()
@@ -638,7 +536,6 @@ class GrossProfitGenerator:
 		if grouped_by_invoice:
 			buying_amount = 0
 			base_amount = 0
-			discount_amount = 0
 
 		for row in reversed(self.si_list):
 			sales_invoice_item = row.item_row
@@ -650,32 +547,6 @@ class GrossProfitGenerator:
 				continue
 
 			row.base_amount = flt(row.base_net_amount, self.currency_precision)
-
-			# calculate discount amount & percentage for item row
-			row_discount = (
-				flt(row.get("discount_amount", 0.0)) * flt(row.get("qty", 0.0))
-				+ flt(row.get("distributed_discount_amount", 0.0))
-			) * flt(row.get("conversion_rate", 1.0) or 1.0)
-			row.discount_amount = flt(row_discount, self.currency_precision)
-
-			item_disc_pct = flt(row.get("discount_percentage", 0.0))
-			inv_disc_pct = flt(row.get("additional_discount_percentage", 0.0))
-			if item_disc_pct and inv_disc_pct:
-				row.discount_percentage = flt(
-					100.0 * (1.0 - (1.0 - item_disc_pct / 100.0) * (1.0 - inv_disc_pct / 100.0)),
-					2,
-				)
-			elif item_disc_pct:
-				row.discount_percentage = flt(item_disc_pct, 2)
-			elif inv_disc_pct:
-				row.discount_percentage = flt(inv_disc_pct, 2)
-			elif row.discount_amount and (row.base_amount + row.discount_amount):
-				row.discount_percentage = flt(
-					(row.discount_amount / (row.base_amount + row.discount_amount)) * 100.0,
-					2,
-				)
-			else:
-				row.discount_percentage = 0.0
 
 			product_bundles = []
 			if row.update_stock:
@@ -704,8 +575,6 @@ class GrossProfitGenerator:
 				if not grouped_by_invoice:
 					row.qty = 0
 				row.buying_amount = 0
-				row.discount_amount = 0.0
-				row.discount_percentage = 0.0
 			elif row.item_code in product_bundles:
 				row.buying_amount = flt(
 					self.get_buying_amount_from_product_bundle(row, product_bundles[row.item_code]),
@@ -717,17 +586,8 @@ class GrossProfitGenerator:
 			if grouped_by_invoice and row.indent == 0.0:
 				row.buying_amount = buying_amount
 				row.base_amount = base_amount
-				row.discount_amount = discount_amount
-				if (row.base_amount or 0) + (row.discount_amount or 0):
-					row.discount_percentage = flt(
-						(row.discount_amount / (row.base_amount + row.discount_amount)) * 100.0,
-						2,
-					)
-				else:
-					row.discount_percentage = 0.0
 				buying_amount = 0
 				base_amount = 0
-				discount_amount = 0
 
 			# get buying rate
 			if flt(row.qty):
@@ -743,14 +603,10 @@ class GrossProfitGenerator:
 
 			if self.is_not_invoice_row(row):
 				self.update_return_invoices(row, sales_invoice_item)
-				if not flt(row.qty):
-					row.discount_amount = 0.0
-					row.discount_percentage = 0.0
 
 			if grouped_by_invoice and row.indent == 1.0:
 				buying_amount += row.buying_amount
 				base_amount += row.base_amount
-				discount_amount += row.discount_amount
 
 			# calculate gross profit
 			row.gross_profit = flt(
@@ -834,10 +690,6 @@ class GrossProfitGenerator:
 						new_row.base_amount = flt(
 							(new_row.base_amount + row.base_amount), self.currency_precision
 						)
-						new_row.discount_amount = flt(
-							((new_row.discount_amount or 0.0) + (row.discount_amount or 0.0)),
-							self.currency_precision,
-						)
 						if self.filters.get("group_by") == "Sales Person":
 							new_row.allocated_amount = flt(
 								(new_row.allocated_amount + row.allocated_amount), self.currency_precision
@@ -846,13 +698,12 @@ class GrossProfitGenerator:
 				self.grouped_data.append(new_row)
 
 	def set_average_based_on_payment_term_portion(self, new_row, row, invoice_portion, aggr=False):
-		cols = ["base_amount", "buying_amount", "gross_profit", "discount_amount"]
+		cols = ["base_amount", "buying_amount", "gross_profit"]
 		for col in cols:
-			val = (row.get(col) or 0.0) * invoice_portion / 100
 			if aggr:
-				new_row[col] = (new_row.get(col) or 0.0) + val
+				new_row[col] += row[col] * invoice_portion / 100
 			else:
-				new_row[col] = val
+				new_row[col] = row[col] * invoice_portion / 100
 
 	def is_not_invoice_row(self, row):
 		return (self.filters.get("group_by") == "Invoice" and row.indent != 0.0) or self.filters.get(
@@ -865,13 +716,6 @@ class GrossProfitGenerator:
 			flt(new_row.buying_amount / new_row.qty, self.float_precision) if new_row.qty else 0
 		)
 		new_row.base_rate = flt(new_row.base_amount / new_row.qty, self.float_precision) if new_row.qty else 0
-		if (new_row.base_amount or 0) + (new_row.discount_amount or 0):
-			new_row.discount_percentage = flt(
-				(new_row.discount_amount / (new_row.base_amount + new_row.discount_amount)) * 100.0,
-				2,
-			)
-		else:
-			new_row.discount_percentage = 0.0
 		return new_row
 
 	def set_average_gross_profit(self, new_row):
@@ -890,7 +734,7 @@ class GrossProfitGenerator:
 	def get_returned_invoice_items(self):
 		si = frappe.qb.DocType("Sales Invoice")
 		si_item = frappe.qb.DocType("Sales Invoice Item")
-		query = (
+		returned_invoices = (
 			frappe.qb.from_(si)
 			.inner_join(si_item)
 			.on(si.name == si_item.parent)
@@ -907,14 +751,8 @@ class GrossProfitGenerator:
 				& (si.is_return == 1)
 				& si.posting_date.between(self.filters.from_date, self.filters.to_date)
 			)
+			.run(as_dict=1)
 		)
-
-		if self.companies:
-			query = query.where(si.company.isin(self.companies))
-		elif self.filters.company:
-			query = query.where(si.company == self.filters.company)
-
-		returned_invoices = query.run(as_dict=1)
 
 		self.returned_invoices = frappe._dict()
 		self.legacy_returned_invoices = frappe._dict()
@@ -1028,7 +866,7 @@ class GrossProfitGenerator:
 			return flt(row.qty) * item_rate
 
 		else:
-			my_sle = self.get_stock_ledger_entries(item_code, row.warehouse, row.get("company"))
+			my_sle = self.get_stock_ledger_entries(item_code, row.warehouse)
 			if (row.update_stock or row.dn_detail) and my_sle:
 				parenttype = row.parenttype
 				parent = row.invoice or row.parent
@@ -1116,15 +954,14 @@ class GrossProfitGenerator:
 
 	def get_average_buying_rate(self, row, item_code):
 		args = row
-		company = row.get("company") or self.filters.company
-		key = (item_code, row.warehouse, company)
+		key = (item_code, row.warehouse)
 		if key not in self.average_buying_rate:
 			args.update(
 				{
 					"voucher_type": row.parenttype,
 					"voucher_no": row.parent,
 					"allow_zero_valuation": True,
-					"company": company,
+					"company": self.filters.company,
 					"item_code": item_code,
 				}
 			)
@@ -1154,10 +991,6 @@ class GrossProfitGenerator:
 			.where(purchase_invoice.is_return == 0)
 			.where(purchase_invoice_item.parenttype == "Purchase Invoice")
 		)
-
-		company = row.get("company") or self.filters.company
-		if company:
-			query = query.where(purchase_invoice.company == company)
 
 		if row.project:
 			query = query.where(purchase_invoice_item.project == row.project)
@@ -1220,7 +1053,6 @@ class GrossProfitGenerator:
 		query = self.apply_common_filters(query, SalesInvoice, SalesInvoiceItem, SalesTeam, Item)
 
 		query = query.select(
-			SalesInvoice.company,
 			SalesInvoiceItem.parenttype,
 			SalesInvoiceItem.parent,
 			SalesInvoice.posting_date,
@@ -1251,12 +1083,6 @@ class GrossProfitGenerator:
 			SalesInvoiceItem.cost_center,
 			SalesInvoiceItem.serial_and_batch_bundle,
 			SalesInvoiceItem.delivered_by_supplier,
-			SalesInvoiceItem.discount_percentage,
-			SalesInvoiceItem.discount_amount,
-			SalesInvoiceItem.distributed_discount_amount,
-			SalesInvoice.additional_discount_percentage,
-			SalesInvoice.base_discount_amount.as_("invoice_base_discount_amount"),
-			Coalesce(SalesInvoice.conversion_rate, 1.0).as_("conversion_rate"),
 		)
 
 		if self.filters.group_by == "Sales Person":
@@ -1291,9 +1117,7 @@ class GrossProfitGenerator:
 		return query
 
 	def apply_common_filters(self, query, SalesInvoice, SalesInvoiceItem, SalesTeam, Item):
-		if self.companies:
-			query = query.where(SalesInvoice.company.isin(self.companies))
-		elif self.filters.company:
+		if self.filters.company:
 			query = query.where(SalesInvoice.company == self.filters.company)
 
 		if self.filters.from_date:
@@ -1415,7 +1239,6 @@ class GrossProfitGenerator:
 				"parent_invoice": "",
 				"indent": 0.0,
 				"invoice_or_item": row.parent,
-				"company": row.company,
 				"parent": None,
 				"posting_date": row.posting_date,
 				"posting_time": row.posting_time,
@@ -1438,8 +1261,6 @@ class GrossProfitGenerator:
 				"is_return": row.is_return,
 				"cost_center": row.cost_center,
 				"base_net_amount": row.invoice_base_net_total,
-				"discount_amount": 0.0,
-				"discount_percentage": 0.0,
 			}
 		)
 
@@ -1451,7 +1272,6 @@ class GrossProfitGenerator:
 				"indent": row.indent + 1,
 				"parent": None,
 				"invoice_or_item": item.item_code,
-				"company": row.company,
 				"posting_date": row.posting_date,
 				"posting_time": row.posting_time,
 				"project": row.project,
@@ -1474,18 +1294,14 @@ class GrossProfitGenerator:
 				"cost_center": row.cost_center,
 				"invoice": row.parent,
 				"serial_and_batch_bundle": row.serial_and_batch_bundle,
-				"discount_amount": 0.0,
-				"discount_percentage": 0.0,
 			}
 		)
 
-	def get_stock_ledger_entries(self, item_code, warehouse, company=None):
-		company = company or self.filters.company
+	def get_stock_ledger_entries(self, item_code, warehouse):
 		if item_code and warehouse:
-			key = (item_code, warehouse, company)
-			if key not in self.sle:
+			if (item_code, warehouse) not in self.sle:
 				sle = qb.DocType("Stock Ledger Entry")
-				query = (
+				res = (
 					qb.from_(sle)
 					.select(
 						sle.item_code,
@@ -1497,23 +1313,19 @@ class GrossProfitGenerator:
 						sle.actual_qty.as_("qty"),
 					)
 					.where(
-						(sle.item_code == item_code)
+						(sle.company == self.filters.company)
+						& (sle.item_code == item_code)
 						& (sle.warehouse == warehouse)
 						& (sle.is_cancelled == 0)
 					)
-				)
-				if company:
-					query = query.where(sle.company == company)
-
-				res = (
-					query.orderby(sle.item_code)
+					.orderby(sle.item_code)
 					.orderby(sle.warehouse, sle.posting_datetime, sle.creation, order=Order.desc)
 					.run(as_dict=True)
 				)
 
-				self.sle[key] = res
+				self.sle[(item_code, warehouse)] = res
 
-			return self.sle[key]
+			return self.sle[(item_code, warehouse)]
 		return []
 
 	def load_product_bundle(self):
