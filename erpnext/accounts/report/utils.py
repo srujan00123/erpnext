@@ -349,17 +349,11 @@ def apply_common_conditions(filters, query, doctype, child_doctype=None, payment
 	join_required = False
 
 	if filters.get("company"):
-		company = filters.get("company")
-		if frappe.get_cached_value("Company", company, "is_group"):
-			lft, rgt = frappe.get_cached_value("Company", company, ["lft", "rgt"])
-			companies = frappe.get_all("Company", filters={"lft": [">=", lft], "rgt": ["<=", rgt]}, pluck="name")
-			query = query.where(parent_doc.company.isin(companies))
-		else:
-			query = query.where(parent_doc.company == company)
+		query = query.where(parent_doc.company == filters.company)
 	if filters.get("from_date"):
-		query = query.where(parent_doc.posting_date >= filters.get("from_date"))
+		query = query.where(parent_doc.posting_date >= filters.from_date)
 	if filters.get("to_date"):
-		query = query.where(parent_doc.posting_date <= filters.get("to_date"))
+		query = query.where(parent_doc.posting_date <= filters.to_date)
 
 	if payments:
 		if doctype == "Journal Entry" and filters.get("cost_center"):

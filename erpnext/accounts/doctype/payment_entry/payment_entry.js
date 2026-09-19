@@ -264,7 +264,6 @@ frappe.ui.form.on("Payment Entry", {
 			);
 		}
 		erpnext.accounts.unreconcile_payment.add_unreconcile_btn(frm);
-		frm.events.add_reference_navigation(frm);
 		frappe.flags.allocate_payment_amount = true;
 	},
 
@@ -434,84 +433,6 @@ frappe.ui.form.on("Payment Entry", {
 				};
 				frappe.set_route("query-report", "General Ledger");
 			});
-		}
-	},
-
-	add_reference_navigation: function (frm) {
-		if (!frm.doc.references || !frm.doc.references.length) {
-			frm.dashboard.clear_headline();
-			return;
-		}
-
-		const valid_refs = frm.doc.references.filter((r) => r.reference_doctype && r.reference_name);
-		if (!valid_refs.length) {
-			frm.dashboard.clear_headline();
-			return;
-		}
-
-		// Group by reference_doctype to handle single or multiple references cleanly
-		const refs_by_doctype = {};
-		valid_refs.forEach((ref) => {
-			if (!refs_by_doctype[ref.reference_doctype]) {
-				refs_by_doctype[ref.reference_doctype] = [];
-			}
-			if (!refs_by_doctype[ref.reference_doctype].find((item) => item.name === ref.reference_name)) {
-				refs_by_doctype[ref.reference_doctype].push({
-					name: ref.reference_name,
-					allocated_amount: ref.allocated_amount,
-				});
-			}
-		});
-
-		// 1. Add top toolbar buttons for direct 1-click navigation
-		const doctypes = Object.keys(refs_by_doctype);
-		doctypes.forEach((dt) => {
-			const items = refs_by_doctype[dt];
-			if (items.length === 1) {
-				const docname = items[0].name;
-				frm.add_custom_button(
-					__("{0}: {1}", [__(dt), docname]),
-					function () {
-						frappe.set_route("Form", dt, docname);
-					}
-				);
-			} else {
-				items.forEach((item) => {
-					frm.add_custom_button(
-						item.name,
-						function () {
-							frappe.set_route("Form", dt, item.name);
-						},
-						__("{0} ({1})", [__(dt), items.length])
-					);
-				});
-			}
-		});
-
-		// 2. Add headline alert banner at top of form
-		const links = [];
-		const currency = frm.doc.paid_to_account_currency || frm.doc.paid_from_account_currency || frm.doc.company_currency;
-		valid_refs.forEach((ref) => {
-			const url = frappe.utils.get_form_link(ref.reference_doctype, ref.reference_name);
-			const amt_str = ref.allocated_amount ? ` (${format_currency(ref.allocated_amount, currency)})` : "";
-			links.push(`<a href="${url}" class="font-weight-bold" style="text-decoration: underline;">${ref.reference_name}</a>${amt_str}`);
-		});
-
-		if (links.length) {
-			const first_dt = valid_refs[0].reference_doctype;
-			const is_single_type = valid_refs.every((r) => r.reference_doctype === first_dt);
-			const label = is_single_type
-				? (valid_refs.length === 1 ? __("Linked to {0}: {1}", [__(first_dt), links[0]]) : __("Linked {0}s: {1}", [__(first_dt), links.join(", ")]))
-				: __("Linked References: {0}", [links.join(", ")]);
-
-			frm.dashboard.set_headline_alert(
-				`<div class="flex items-center" style="gap: 6px;">
-					<svg class="icon icon-sm" style="margin-right: 4px;"><use href="#icon-link"></use></svg>
-					<span>${label}</span>
-				</div>`,
-				"blue",
-				true
-			);
 		}
 	},
 
@@ -1894,7 +1815,6 @@ frappe.ui.form.on("Payment Entry Reference", {
 
 						frappe.model.set_value(cdt, cdn, "allocated_amount", allocated_amount);
 						frm.refresh_fields();
-						frm.events.add_reference_navigation(frm);
 					}
 				},
 			});
@@ -1907,7 +1827,6 @@ frappe.ui.form.on("Payment Entry Reference", {
 
 	references_remove: function (frm) {
 		frm.events.set_total_allocated_amount(frm);
-		frm.events.add_reference_navigation(frm);
 	},
 });
 

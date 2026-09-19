@@ -716,13 +716,6 @@ def get_basic_details(ctx: frappe._dict, item, overwrite_warehouse=True) -> frap
 
 @erpnext.normalize_ctx_input(ItemDetailsCtx)
 def get_item_warehouse_(ctx: ItemDetailsCtx, item, overwrite_warehouse, defaults=None):
-	is_stock_item = getattr(item, "is_stock_item", None)
-	if is_stock_item is None and item and getattr(item, "name", None):
-		is_stock_item = frappe.get_cached_value("Item", item.name, "is_stock_item")
-
-	if is_stock_item is not None and not is_stock_item:
-		return None
-
 	if not defaults:
 		defaults = frappe._dict(
 			{
@@ -744,7 +737,7 @@ def get_item_warehouse_(ctx: ItemDetailsCtx, item, overwrite_warehouse, defaults
 	else:
 		warehouse = ctx.warehouse
 
-	if not warehouse and ctx.company and is_stock_item:
+	if not warehouse and ctx.company:
 		return frappe.get_cached_value("Company", ctx.company, "default_warehouse")
 
 	return warehouse

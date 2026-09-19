@@ -341,17 +341,9 @@ def get_columns(additional_table_columns, filters):
 
 
 def apply_conditions(query, si, sii, sip, filters, additional_conditions=None):
-	if filters.get("company"):
-		company = filters.get("company")
-		if frappe.get_cached_value("Company", company, "is_group"):
-			lft, rgt = frappe.get_cached_value("Company", company, ["lft", "rgt"])
-			companies = frappe.get_all("Company", filters={"lft": [">=", lft], "rgt": ["<=", rgt]}, pluck="name")
-			query = query.where(si.company.isin(companies))
-		else:
-			query = query.where(si.company == company)
-
-	if filters.get("customer"):
-		query = query.where(si.customer == filters.get("customer"))
+	for opts in ("company", "customer"):
+		if filters.get(opts):
+			query = query.where(si[opts] == filters[opts])
 
 	if filters.get("from_date"):
 		query = query.where(si.posting_date >= filters.get("from_date"))
