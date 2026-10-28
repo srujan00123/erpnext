@@ -801,6 +801,18 @@ class TestItem(ERPNextTestSuite):
 		)
 		self.assertFalse(frappe.db.exists("Item Price", {"item_code": template.name}))
 
+	def test_standard_rate_price_once_when_companies_share_a_list(self):
+		# Two companies whose defaults name no price list both resolve to the
+		# default selling list; the second insert used to fail as a duplicate.
+		item = make_item(
+			properties={
+				"is_stock_item": 1,
+				"standard_rate": 120,
+				"item_defaults": [{"company": "_Test Company"}, {"company": "_Test Company 1"}],
+			}
+		).name
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": item}), 1)
+
 	@ERPNextTestSuite.change_settings("Global Defaults", {"default_company": "_Test Company"})
 	@ERPNextTestSuite.change_settings("Accounts Settings", {"allow_stale": 1})
 	def test_standard_rate_price_uses_the_selling_exchange_rate(self):
